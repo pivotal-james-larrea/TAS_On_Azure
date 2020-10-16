@@ -8,6 +8,13 @@ else
     brew update && brew install azure-cli
 fi
 
+if [ -f "/usr/local/bin/azcopy" ]; then
+    echo "Azcopy already installed"
+else
+    echo "installing azcopy..."
+    brew install azcopy
+fi
+
 az cloud set --name AzureCloud
 
 echo "Log in with your Pivotal AD account on your browser"
@@ -119,7 +126,7 @@ az network vnet subnet create --name tas-services-subnet \
 --network-security-group tas-nsg
 
 echo "Creating Bosh storage account..."
-STORAGE_NAME="${RESOURCE_GROUP}boshstorage4tas"
+STORAGE_NAME="${RESOURCE_GROUP}storage4tas"
 az storage account create --name $STORAGE_NAME \
 --resource-group $RESOURCE_GROUP \
 --sku Standard_LRS \
@@ -139,9 +146,9 @@ az storage table create --name stemcells \
 
 echo "Creating other storage accounts..."
 STORAGE_TYPE="Premium_LRS"
-STORAGE_NAME1="${RESOURCE_GROUP}boshstorage4tas1"
-STORAGE_NAME2="${RESOURCE_GROUP}boshstorage4tas2"
-STORAGE_NAME3="${RESOURCE_GROUP}boshstorage4tas3"
+STORAGE_NAME1="${RESOURCE_GROUP}storage4tas1"
+STORAGE_NAME2="${RESOURCE_GROUP}storage4tas2"
+STORAGE_NAME3="${RESOURCE_GROUP}storage4tas3"
 
 az storage account create --name $STORAGE_NAME1 \
 --resource-group $RESOURCE_GROUP --sku $STORAGE_TYPE \
@@ -203,5 +210,12 @@ az network lb rule create --lb-name pcf-lb \
 --backend-pool-name pcf-lb-be-pool \
 --probe-name http8080
 
-az network public-ip show --name pcf-lb-ip --resource-group $RESOURCE_GROUP > azure_dep_out
+echo "Load Balancer IP adress: "
+az network public-ip show --name pcf-lb-ip --resource-group $RESOURCE_GROUP | grep -i ipAddress >> azure_dep_out
 
+
+read -p 'Please enter the Opsman exact version and build (Example: 2.9.11-build.186): ' OPSMAN_VERSION
+OPS_MAN_IMAGE_URL=https://opsmanagereastus.blob.core.windows.net/images/ops-manager-$OPSMAN_VERSION.vhd
+DESTINATION_STORAGE=https://$STORAGE_NAME.blob.core.windows.net/opsmanager/ops-manager-$OPSMAN_VERSION.vhd
+
+./azcopy copy $OPS_MAN_IMAGE_URL $DESTINATION_STORAGE
