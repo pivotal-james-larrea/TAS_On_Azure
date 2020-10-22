@@ -12,7 +12,7 @@ if [ -f "/usr/local/bin/azcopy" ]; then
     echo "Azcopy already installed"
 else
     echo "installing azcopy..."
-    brew install azcopy
+    brew update && brew install azcopy
 fi
 
 az cloud set --name AzureCloud
@@ -20,6 +20,8 @@ az cloud set --name AzureCloud
 echo "Log in with your Pivotal AD account on your browser"
 az login
 
+read -p 'Please enter the Opsman exact version and build. 
+You can find that info here https://network.pivotal.io/products/ops-manager/#/releases (Example: 2.9.11-build.186). : ' OPSMAN_VERSION
 read -p 'Which support team are you a part of? (useast or uswest): ' GSS_TEAM
 read -p 'Please enter a unique name for your resource group - all lowercase (Example: jsmith): ' RESOURCE_GROUP
 read -sp 'Please enter a new password for Service Principal for Bosh: ' SP_SECRET
@@ -210,12 +212,65 @@ az network lb rule create --lb-name pcf-lb \
 --backend-pool-name pcf-lb-be-pool \
 --probe-name http8080
 
-echo "Load Balancer IP adress: "
+echo "Load Balancer IP adress:" > azure_dep_out 
 az network public-ip show --name pcf-lb-ip --resource-group $RESOURCE_GROUP | grep -i ipAddress >> azure_dep_out
 
+# Boot Ops Manager
+echo "copying image to storage..."
+OPS_MAN_IMAGE_URL=https://opsmanager$LOCATION.blob.core.windows.net/images/ops-manager-$OPSMAN_VERSION.vhd
 
-read -p 'Please enter the Opsman exact version and build (Example: 2.9.11-build.186): ' OPSMAN_VERSION
-OPS_MAN_IMAGE_URL=https://opsmanagereastus.blob.core.windows.net/images/ops-manager-$OPSMAN_VERSION.vhd
-DESTINATION_STORAGE=https://$STORAGE_NAME.blob.core.windows.net/opsmanager/ops-manager-$OPSMAN_VERSION.vhd
+az storage blob copy start --source-uri $OPS_MAN_IMAGE_URL \
+--connection-string $CONNECTION_STRING \
+--destination-container opsmanager \
+--destination-blob opsman-$OPSMAN_VERSION.vhd
 
-./azcopy copy $OPS_MAN_IMAGE_URL $DESTINATION_STORAGE
+#Alternatively, you can use azcopy to upload your image to storage
+# EXPIRY=`date -v +1d +%Y-%m-%dT%H:%MZ`
+# KEY=`az storage account keys list --account-name $STORAGE_NAME -o json | grep key1 -A 2 | grep value | cut -b 15-102`
+# SAS=`az storage container generate-sas -n opsmanager --account-name $STORAGE_NAME --account-key $KEY --https-only --permissions dlrw --expiry $EXPIRY -o tsv`
+# DESTINATION_STORAGE=https://$STORAGE_NAME.blob.core.windows.net/opsmanager/ops-manager-$OPSMAN_VERSION.vhd?$SAS
+# azcopy copy "$OPS_MAN_IMAGE_URL" "$DESTINATION_STORAGE"
+
+# Create a public IP for Ops Manager
+az network public-ip create --name ops-manager-ip \
+--resource-group $RESOURCE_GROUP --location $LOCATION \
+--allocation-method Static
+
+echo "Opsmanager IP adress:" > azure_dep_out 
+az network public-ip show --name ops-manager-ip --resource-group $RESOURCE_GROUP | grep -i ipAddress >> azure_dep_out
+
+# Create a network interface for Ops Manager
+az network nic create --vnet-name tas-virtual-network \
+--subnet tas-infrastructure-subnet --network-security-group opsmgr-nsg \
+--private-ip-address 10.0.4.4 \
+--public-ip-address ops-manager-ip \
+--resource-group $RESOURCE_GROUP \
+--name opsman-nic --location $LOCATION
+
+# Create a keypair
+if [ -d "$HOME/.ssh/azurekeys" ]; then
+    echo "Key pair already exists"
+else
+    echo "Creating a key pair in ~/.ssh/azurekeys"
+    mkdir ~/.ssh/azurekeys
+    ssh-keygen -t rsa -f ~/.ssh/azurekeys/opsman -C ubuntu -N ""
+fi
+
+
+
+az image create --resource-group $RESOURCE_GROUP \
+--name opsman-$OPSMAN_VERSION \
+--source https://$STORAGE_NAME.blob.core.windows.net/opsmanager/opsman-$OPSMAN_VERSION.vhd \
+--location $LOCATION \
+--os-type Linux
+
+az vm create --name opsman-$OPSMAN_VERSION --resource-group $RESOURCE_GROUP \
+--location $LOCATION \
+--nics opsman-nic \
+--image psman-$OPSMAN_VERSION \
+--os-disk-size-gb 128 \
+--os-disk-name opsman-$OPSMAN_VERSION-osdisk \
+--admin-username ubuntu \
+--size Standard_DS2_v2 \
+--storage-sku Standard_LRS \
+--ssh-key-value ~/.ssh/azurekeys/opsman.pub
