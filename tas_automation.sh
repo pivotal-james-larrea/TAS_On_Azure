@@ -257,6 +257,19 @@ else
 fi
 
 
+function get_status() {
+    echo $(az storage blob show --name opsman-$OPSMAN_VERSION.vhd --connection-string $CONNECTION_STRING --container-name opsmanager | grep success | cut -b 18-24)
+}
+
+CPSTATUS="copying"
+
+while [ "$CPSTATUS" != "success" ]; do
+    CPSTATUS="$(get_status)"
+    echo "blob is still copying..."
+    sleep 20
+done
+
+echo "Transfer complete"
 
 az image create --resource-group $RESOURCE_GROUP \
 --name opsman-$OPSMAN_VERSION \
@@ -267,7 +280,7 @@ az image create --resource-group $RESOURCE_GROUP \
 az vm create --name opsman-$OPSMAN_VERSION --resource-group $RESOURCE_GROUP \
 --location $LOCATION \
 --nics opsman-nic \
---image psman-$OPSMAN_VERSION \
+--image opsman-$OPSMAN_VERSION \
 --os-disk-size-gb 128 \
 --os-disk-name opsman-$OPSMAN_VERSION-osdisk \
 --admin-username ubuntu \
