@@ -8,12 +8,13 @@ else
     brew update && brew install azure-cli
 fi
 
-if [ -f "/usr/local/bin/azcopy" ]; then
-    echo "Azcopy already installed"
-else
-    echo "installing azcopy..."
-    brew update && brew install azcopy
-fi
+# You can also install azcopy to move the blob
+# if [ -f "/usr/local/bin/azcopy" ]; then
+#     echo "Azcopy already installed"
+# else
+#     echo "installing azcopy..."
+#     brew update && brew install azcopy
+# fi
 
 az cloud set --name AzureCloud
 
@@ -24,11 +25,11 @@ read -p 'Please enter the Opsman exact version and build.
 You can find that info here https://network.pivotal.io/products/ops-manager/#/releases (Example: 2.9.11-build.186). : ' OPSMAN_VERSION
 read -p 'Which support team are you a part of? (useast or uswest): ' GSS_TEAM
 read -p 'Please enter a unique name for your resource group - all lowercase (Example: jsmith): ' RESOURCE_GROUP
-read -sp 'Please enter a new password for Service Principal for Bosh: ' SP_SECRET
+read -sp 'Please enter a new password for Service Principal/Opsman: ' SP_SECRET
 
 # You should only have one GSS subscription but just in case
-SUBSCRIPTION_ID=$(az account list | grep -i $GSS_TEAM -B 3 | grep id | cut -b 12-47)
-TENANT_ID=$(az account list | grep -i $GSS_TEAM -A 2 | grep tenantId | cut -b 18-53)
+SUBSCRIPTION_ID=$(az account list | grep -i $GSS_TEAM -B 3 | grep id | cut -c 12-47)
+TENANT_ID=$(az account list | grep -i $GSS_TEAM -A 2 | grep tenantId | cut -c 18-53)
 SP_NAME="http://BoshAzure$RESOURCE_GROUP"
 
 az account set --subscription $SUBSCRIPTION_ID
@@ -36,7 +37,7 @@ az ad app create --display-name "Service Principal for BOSH" \
 --password $SP_SECRET --homepage "http://BOSHAzureCPI" \
 --identifier-uris $SP_NAME
 
-APPLICATION_ID=$(az ad app list --identifier-uri $SP_NAME | grep appId | cut -b 15-50)
+APPLICATION_ID=$(az ad app list --identifier-uri $SP_NAME | grep appId | cut -c 15-50)
 
 echo "Creating a Service Principal..."
 az ad sp create --id $APPLICATION_ID
@@ -116,7 +117,7 @@ az network vnet subnet create --name tas-infrastructure-subnet \
 --resource-group $RESOURCE_GROUP \
 --address-prefix 10.0.4.0/26 \
 --network-security-group tas-nsg
-az network vnet subnet create --name tas-pas-subnet \
+az network vnet subnet create --name tas-runtime-subnet \
 --vnet-name tas-virtual-network \
 --resource-group $RESOURCE_GROUP \
 --address-prefix 10.0.12.0/22 \
@@ -212,9 +213,6 @@ az network lb rule create --lb-name pcf-lb \
 --backend-pool-name pcf-lb-be-pool \
 --probe-name http8080
 
-echo "Load Balancer IP adress:" > azure_dep_out 
-az network public-ip show --name pcf-lb-ip --resource-group $RESOURCE_GROUP | grep -i ipAddress >> azure_dep_out
-
 # Boot Ops Manager
 echo "copying image to storage..."
 OPS_MAN_IMAGE_URL=https://opsmanager$LOCATION.blob.core.windows.net/images/ops-manager-$OPSMAN_VERSION.vhd
@@ -226,7 +224,7 @@ az storage blob copy start --source-uri $OPS_MAN_IMAGE_URL \
 
 #Alternatively, you can use azcopy to upload your image to storage
 # EXPIRY=`date -v +1d +%Y-%m-%dT%H:%MZ`
-# KEY=`az storage account keys list --account-name $STORAGE_NAME -o json | grep key1 -A 2 | grep value | cut -b 15-102`
+# KEY=`az storage account keys list --account-name $STORAGE_NAME -o json | grep key1 -A 2 | grep value | cut -c 15-102`
 # SAS=`az storage container generate-sas -n opsmanager --account-name $STORAGE_NAME --account-key $KEY --https-only --permissions dlrw --expiry $EXPIRY -o tsv`
 # DESTINATION_STORAGE=https://$STORAGE_NAME.blob.core.windows.net/opsmanager/ops-manager-$OPSMAN_VERSION.vhd?$SAS
 # azcopy copy "$OPS_MAN_IMAGE_URL" "$DESTINATION_STORAGE"
@@ -235,9 +233,6 @@ az storage blob copy start --source-uri $OPS_MAN_IMAGE_URL \
 az network public-ip create --name ops-manager-ip \
 --resource-group $RESOURCE_GROUP --location $LOCATION \
 --allocation-method Static
-
-echo "Opsmanager IP adress:" > azure_dep_out 
-az network public-ip show --name ops-manager-ip --resource-group $RESOURCE_GROUP | grep -i ipAddress >> azure_dep_out
 
 # Create a network interface for Ops Manager
 az network nic create --vnet-name tas-virtual-network \
@@ -257,8 +252,8 @@ else
 fi
 
 
-function get_status() {
-    echo $(az storage blob show --name opsman-$OPSMAN_VERSION.vhd --connection-string $CONNECTION_STRING --container-name opsmanager | grep success | cut -b 18-24)
+get_status() {
+  echo $(az storage blob show --name opsman-$OPSMAN_VERSION.vhd --connection-string $CONNECTION_STRING --container-name opsmanager | grep success | cut -c 18-24)
 }
 
 CPSTATUS="copying"
@@ -266,7 +261,7 @@ CPSTATUS="copying"
 while [ "$CPSTATUS" != "success" ]; do
     CPSTATUS="$(get_status)"
     echo "blob is still copying..."
-    sleep 20
+    sleep 30
 done
 
 echo "Transfer complete"
@@ -287,3 +282,176 @@ az vm create --name opsman-$OPSMAN_VERSION --resource-group $RESOURCE_GROUP \
 --size Standard_DS2_v2 \
 --storage-sku Standard_LRS \
 --ssh-key-value ~/.ssh/azurekeys/opsman.pub
+
+
+OPSMAN_IP=$(az network public-ip show --name ops-manager-ip --resource-group $RESOURCE_GROUP | grep ipAddress | cut -c 17- | sed 's/",$//')
+OPSMAN_URL="opsman.$RESOURCE_GROUP.taslab4tanzu.com"
+sudo -- sh -c -e "echo '$OPSMAN_IP' '$OPSMAN_URL' >> /etc/hosts"
+
+
+opsman_authentication_setup()
+{
+  cat <<EOF
+{
+    "setup": {
+    "decryption_passphrase": "$SP_SECRET",
+    "decryption_passphrase_confirmation": "$SP_SECRET",
+    "eula_accepted": "true",
+    "identity_provider": "internal",
+    "admin_user_name": "admin",
+    "admin_password": "$SP_SECRET",
+    "admin_password_confirmation": "$SP_SECRET"
+    }
+}
+EOF
+}
+
+
+curl -k -X POST -H "Content-Type: application/json" -d "$(opsman_authentication_setup)" "https://$OPSMAN_URL/api/v0/setup"
+
+echo "setting up Opsman authentication..."
+sleep 60
+
+uaac target https://$OPSMAN_URL/uaa --skip-ssl-validation
+uaac token owner get opsman admin -s "" -p $SP_SECRET
+OPSMAN_TOKEN=$(uaac context | grep access_token | cut -c 21-)
+
+director_newconfig()
+{
+  cat <<EOF
+{
+  "director_configuration": {
+    "ntp_servers_string": "ntp.ubuntu.com",
+    "resurrector_enabled": false,
+    "director_hostname": null,
+    "max_threads": null,
+    "custom_ssh_banner": null,
+    "metrics_server_enabled": true,
+    "system_metrics_runtime_enabled": true,
+    "opentsdb_ip": null,
+    "director_worker_count": 5,
+    "post_deploy_enabled": false,
+    "bosh_recreate_on_next_deploy": false,
+    "bosh_director_recreate_on_next_deploy": false,
+    "bosh_recreate_persistent_disks_on_next_deploy": false,
+    "retry_bosh_deploys": false,
+    "keep_unreachable_vms": false,
+    "identification_tags": {},
+    "skip_director_drain": false,
+    "job_configuration_on_tmpfs": false,
+    "nats_max_payload_mb": null,
+    "database_type": "internal",
+    "blobstore_type": "local",
+    "local_blobstore_options": {
+      "enable_signed_urls": true
+    },
+    "hm_pager_duty_options": {
+      "enabled": false
+    },
+    "hm_emailer_options": {
+      "enabled": false
+    },
+    "encryption": {
+      "keys": [],
+      "providers": []
+    }
+  },
+  "dns_configuration": {
+    "excluded_recursors": [],
+    "recursor_selection": null,
+    "recursor_timeout": null,
+    "handlers": []
+  },
+  "security_configuration": {
+    "trusted_certificates": null,
+    "generate_vm_passwords": true,
+    "opsmanager_root_ca_trusted_certs": false
+  },
+  "syslog_configuration": {
+    "enabled": false
+  },
+  "iaas_configuration": {
+    "guid": "168d4b31a85bda80c09c",
+    "name": "default",
+    "additional_cloud_properties": {},
+    "subscription_id": "$SUBSCRIPTION_ID",
+    "tenant_id": "$TENANT_ID",
+    "client_id": "$SP_NAME",
+    "client_secret": "$SP_SECRET",
+    "resource_group_name": "$RESOURCE_GROUP",
+    "bosh_storage_account_name": "$STORAGE_NAME",
+    "cloud_storage_type": "managed_disks",
+    "storage_account_type": "Premium_LRS",
+    "default_security_group": null,
+    "deployed_cloud_storage_type": null,
+    "deployments_storage_account_name": null,
+    "ssh_public_key": "$cat ~/.ssh/azurekeys/opsman.pub",
+    "ssh_private_key": "cat ~/.ssh/azurekeys/opsman",
+    "environment": "AzureCloud",
+    "availability_mode": "availability_zones"
+  }
+}
+EOF
+}
+
+curl -k -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(director_newconfig)" "https://$OPSMAN_URL/api/v0/staged/director/properties"
+
+
+
+networks_config()
+{
+  cat <<EOF
+{
+  "icmp_checks_enabled": true,
+  "networks": [
+    {
+      "guid": "d4c84b65974fecd58e10",
+      "name": "infrastructure",
+      "subnets": [
+        {
+          "guid": "959036447af7bc044f32",
+          "iaas_identifier": "tas-virtual-network/tas-infrastructure-subnet",
+          "cidr": "10.0.4.0/26",
+          "dns": "168.63.129.16",
+          "gateway": "10.0.4.1",
+          "reserved_ip_ranges": "10.0.4.1-10.0.4.9"
+        }
+      ]
+    }
+    {
+      "guid": "d4c84b65974fefr4510",
+      "name": tas,
+      "subnets": [
+        {
+          "guid": "959036447ag5d3044f32",
+          "iaas_identifier": "tas-virtual-network/tas-runtime-subnet",
+          "cidr": "10.0.12.0/22",
+          "dns": "168.63.129.16",
+          "gateway": "10.0.12.1",
+          "reserved_ip_ranges": "10.0.12.1-10.0.12.9"
+        }
+      ]
+    }
+    {
+      "guid": "d4c84b67974fec688g10",
+      "name": services,
+      "subnets": [
+        {
+          "guid": "955836877af7bc044f32",
+          "iaas_identifier": "tas-virtual-network/tas-services-subnet",
+          "cidr": "10.0.8.0/22",
+          "dns": "168.63.129.16",
+          "gateway": "10.0.8.1",
+          "reserved_ip_ranges": "10.0.8.1-10.0.8.9"
+        }
+      ]
+    }
+  ]
+}
+EOF
+}
+
+curl -kvv -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(networks_config)" "https://$OPSMAN_URL/api/v0/staged/director/networks"
+
+
+echo "Opsmanager URL is: $OPSMAN_URL"
