@@ -306,10 +306,9 @@ opsman_authentication_setup()
 EOF
 }
 
-
 curl -k -X POST -H "Content-Type: application/json" -d "$(opsman_authentication_setup)" "https://$OPSMAN_URL/api/v0/setup"
 
-echo "setting up Opsman authentication..."
+echo "Setting up Opsman authentication..."
 sleep 60
 
 uaac target https://$OPSMAN_URL/uaa --skip-ssl-validation
@@ -371,7 +370,6 @@ director_newconfig()
     "enabled": false
   },
   "iaas_configuration": {
-    "guid": "168d4b31a85bda80c09c",
     "name": "default",
     "additional_cloud_properties": {},
     "subscription_id": "$SUBSCRIPTION_ID",
@@ -385,8 +383,8 @@ director_newconfig()
     "default_security_group": null,
     "deployed_cloud_storage_type": null,
     "deployments_storage_account_name": null,
-    "ssh_public_key": "$cat ~/.ssh/azurekeys/opsman.pub",
-    "ssh_private_key": "cat ~/.ssh/azurekeys/opsman",
+    "ssh_public_key": "$(cat ~/.ssh/azurekeys/opsman.pub)",
+    "ssh_private_key": "$(cat ~/.ssh/azurekeys/opsman | tr -d '\n')",
     "environment": "AzureCloud",
     "availability_mode": "availability_zones"
   }
@@ -394,64 +392,92 @@ director_newconfig()
 EOF
 }
 
+echo "Configuring bosh director..."
 curl -k -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(director_newconfig)" "https://$OPSMAN_URL/api/v0/staged/director/properties"
-
-
 
 networks_config()
 {
   cat <<EOF
 {
-  "icmp_checks_enabled": true,
-  "networks": [
-    {
-      "guid": "d4c84b65974fecd58e10",
-      "name": "infrastructure",
-      "subnets": [
-        {
-          "guid": "959036447af7bc044f32",
-          "iaas_identifier": "tas-virtual-network/tas-infrastructure-subnet",
-          "cidr": "10.0.4.0/26",
-          "dns": "168.63.129.16",
-          "gateway": "10.0.4.1",
-          "reserved_ip_ranges": "10.0.4.1-10.0.4.9"
-        }
-      ]
+    "icmp_checks_enabled": false,
+    "networks": [
+      {
+        "guid": null,
+        "name": "infrastructure",
+        "subnets": [
+          {
+            "guid": null,
+            "iaas_identifier": "tas-virtual-network/tas-infrastructure-subnet",
+            "cidr": "10.0.4.0/26",
+            "dns": "168.63.129.16",
+            "gateway": "10.0.4.1",
+            "reserved_ip_ranges": "10.0.4.1-10.0.4.9"
+          }
+        ]
+      },
+      {
+        "guid": null,
+        "name": "tas",
+        "subnets": [
+          {
+            "guid": null,
+            "iaas_identifier": "tas-virtual-network/tas-runtime-subnet",
+            "cidr": "10.0.12.0/22",
+            "dns": "168.63.129.16",
+            "gateway": "10.0.12.1",
+            "reserved_ip_ranges": "10.0.12.1-10.0.12.9"
+          }
+        ]
+      }, 
+      {
+        "guid": null,
+        "name": "services",
+        "subnets": [
+          {
+            "guid": null,
+            "iaas_identifier": "tas-virtual-network/tas-services-subnet",
+            "cidr": "10.0.8.0/22",
+            "dns": "168.63.129.16",
+            "gateway": "10.0.8.1",
+            "reserved_ip_ranges": "10.0.8.1-10.0.8.9"
+          }
+        ]
+      } 
+    ]
+  }
+EOF
+}
+
+curl -k -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(networks_config)" "https://$OPSMAN_URL/api/v0/staged/director/networks"
+
+az_singleton()
+{
+  cat <<EOF
+{
+  "network_and_az": {
+    "network": {
+      "name": "infrastructure"
+    },
+    "singleton_availability_zone": {
+      "name": "zone-1"
     }
-    {
-      "guid": "d4c84b65974fefr4510",
-      "name": tas,
-      "subnets": [
-        {
-          "guid": "959036447ag5d3044f32",
-          "iaas_identifier": "tas-virtual-network/tas-runtime-subnet",
-          "cidr": "10.0.12.0/22",
-          "dns": "168.63.129.16",
-          "gateway": "10.0.12.1",
-          "reserved_ip_ranges": "10.0.12.1-10.0.12.9"
-        }
-      ]
-    }
-    {
-      "guid": "d4c84b67974fec688g10",
-      "name": services,
-      "subnets": [
-        {
-          "guid": "955836877af7bc044f32",
-          "iaas_identifier": "tas-virtual-network/tas-services-subnet",
-          "cidr": "10.0.8.0/22",
-          "dns": "168.63.129.16",
-          "gateway": "10.0.8.1",
-          "reserved_ip_ranges": "10.0.8.1-10.0.8.9"
-        }
-      ]
-    }
-  ]
+  }
 }
 EOF
 }
 
-curl -kvv -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(networks_config)" "https://$OPSMAN_URL/api/v0/staged/director/networks"
+curl -k -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(az_singleton)" "https://$OPSMAN_URL/api/v0/staged/director/network_and_az"
 
+apply_changes()
+{
+  cat <<EOF
+{
+"deploy_products": "all",
+"ignore_warnings": true
+}
+EOF
+}
 
-echo "Opsmanager URL is: $OPSMAN_URL"
+curl -k -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(apply_changes)" "https://$OPSMAN_URL/api/v0/installations"
+
+echo "Apply changes started, to check the status go to $OPSMAN_URL"
