@@ -5,7 +5,8 @@ if [ -f "/usr/local/bin/az" ]; then
     echo "Azure cli already installed"
 else
     echo "installing Azure cli..."
-    brew update && brew install azure-cli
+    brew update
+    brew install azure-cli
 fi
 
 # You can also install azcopy to move the blob
@@ -26,6 +27,8 @@ You can find that info here https://network.pivotal.io/products/ops-manager/#/re
 read -p 'Which support team are you a part of? (useast or uswest): ' GSS_TEAM
 read -p 'Please enter a unique name for your resource group - all lowercase (Example: jsmith): ' RESOURCE_GROUP
 read -sp 'Please enter a new password for Service Principal/Opsman: ' SP_SECRET
+echo ''
+read -sp 'Please enter your Mac admin password: ' MAC_ADMIN
 
 # You should only have one GSS subscription but just in case
 SUBSCRIPTION_ID=$(az account list | grep -i $GSS_TEAM -B 3 | grep id | cut -c 12-47)
@@ -42,8 +45,9 @@ APPLICATION_ID=$(az ad app list --identifier-uri $SP_NAME | grep appId | cut -c 
 echo "Creating a Service Principal..."
 az ad sp create --id $APPLICATION_ID
 
+sleep 60
+
 echo "Assigning your Service Principal the Owner role..."
-sleep 10
 az role assignment create --assignee $SP_NAME \
 --role "Owner" --scope /subscriptions/$SUBSCRIPTION_ID
 
@@ -286,7 +290,7 @@ az vm create --name opsman-$OPSMAN_VERSION --resource-group $RESOURCE_GROUP \
 
 OPSMAN_IP=$(az network public-ip show --name ops-manager-ip --resource-group $RESOURCE_GROUP | grep ipAddress | cut -c 17- | sed 's/",$//')
 OPSMAN_URL="opsman.$RESOURCE_GROUP.taslab4tanzu.com"
-sudo -- sh -c -e "echo '$OPSMAN_IP' '$OPSMAN_URL' >> /etc/hosts"
+echo $MAC_ADMIN | sudo -S sh -c -e "echo '$OPSMAN_IP' '$OPSMAN_URL' >> /etc/hosts"
 
 
 opsman_authentication_setup()
@@ -478,6 +482,9 @@ apply_changes()
 EOF
 }
 
+echo "Starting apply changes..."
 curl -k -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(apply_changes)" "https://$OPSMAN_URL/api/v0/installations"
 
-echo "Apply changes started, to check the status go to $OPSMAN_URL"
+echo "
+
+Apply changes started, to check the status go to $OPSMAN_URL"
