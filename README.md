@@ -5,6 +5,6 @@ This is a quick way to get Opsmanager deployed in Azure. The script is making ma
 Prerequisites:
 
 - Brew (to install az cli)
-- uaac
+- uaac cli
 
 Make sure when it asks you to log in to Azure you use the Pivotal subscription (pivotal.io)!
