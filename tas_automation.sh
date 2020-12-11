@@ -483,9 +483,14 @@ apply_changes()
 EOF
 }
 
-echo "Starting apply changes..."
 curl -k -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $OPSMAN_TOKEN" -d "$(apply_changes)" "https://$OPSMAN_URL/api/v0/installations"
 
 echo "
 
-Apply changes started, to check the status go to $OPSMAN_URL"
+Apply changes to deploy Bosh is currently running. 
+You Opsman URL is $OPSMAN_URL
+Your username is admin
+Your password is $SP_SECRET
+ssh to Opsman vm:
+ssh -o StrictHostKeyChecking=no -i ~/.ssh/azurekeys/opsman ubuntu@$OPSMAN_URL
+"
