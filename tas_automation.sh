@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # If you don't have the Azure cli installed on your system go ahead and install it now
 if [ -f "/usr/local/bin/az" ]; then
