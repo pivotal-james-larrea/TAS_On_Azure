@@ -493,4 +493,11 @@ Your username is admin
 Your password is $SP_SECRET
 ssh to Opsman vm:
 ssh -o StrictHostKeyChecking=no -i ~/.ssh/azurekeys/opsman ubuntu@$OPSMAN_URL
+
+To DELETE this deployment, simply run:
+az ad sp delete --id http://BoshAzure$RESOURCE_GROUP
+az group delete -n $RESOURCE_GROUP -y
+
+Don't forget to also delete the entry in your local /etc/hosts:
+$OPSMAN_IP $OPSMAN_URL
 "
