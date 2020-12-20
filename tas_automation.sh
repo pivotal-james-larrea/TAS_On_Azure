@@ -20,7 +20,7 @@ fi
 
 az cloud set --name AzureCloud
 
-echo "Log in with your Pivotal AD account on your browser"
+echo "Log in with your VMware AD account on your browser"
 az login
 
 read -p 'Please enter the Opsman exact version and build. 
