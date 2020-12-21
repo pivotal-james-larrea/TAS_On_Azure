@@ -25,7 +25,7 @@ az login
 
 read -p 'Please enter the Opsman exact version and build. 
 You can find that info here https://network.pivotal.io/products/ops-manager/#/releases (Example: 2.9.11-build.186). : ' OPSMAN_VERSION
-read -p 'Which support team are you a part of? (useast or uswest): ' GSS_TEAM
+read -p 'Which support team are you a part of? (east or west): ' GSS_TEAM
 read -p 'Please enter a unique name for your resource group - all lowercase (Example: jsmith): ' RESOURCE_GROUP
 read -sp 'Please enter a new password for Service Principal/Opsman: ' SP_SECRET
 echo ''
@@ -57,7 +57,7 @@ az provider register --namespace Microsoft.Network
 az provider register --namespace Microsoft.Compute
 
 echo "Creating resource group..."
-if [ $GSS_TEAM = "useast" ]; then
+if [ $GSS_TEAM = "east" ]; then
     LOCATION="eastus"
 else
     LOCATION="westus"
