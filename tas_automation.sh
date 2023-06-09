@@ -1,12 +1,29 @@
 #!/bin/bash
 
+# As of Azure CLI 2.0.68, the --password parameter to create a service principal with a 
+# user-defined password is no longer supported to prevent the accidental use of weak passwords.
+
+# if the script is being run from source, stop now
+if [ "${1}" == "test" ] ; then
+  PS1="test> " bash
+  exit $?
+fi
+
 # If you don't have the Azure cli installed on your system go ahead and install it now
-if [ -f "/usr/local/bin/az" ]; then
+if [ -f "/usr/local/bin/az" ] || [ -f "/opt/homebrew/bin/az" ]; then
     echo "Azure cli already installed"
 else
     echo "installing Azure cli..."
     brew update
     brew install azure-cli
+fi
+
+#check if uaac is installed
+if [ -f "/usr/local/bin/uaac" ]; then
+    echo "uaac is already installed"
+else
+    echo "Please install uaac with gem install cf-uaac"
+    exit $?
 fi
 
 # You can also install azcopy to move the blob
@@ -22,13 +39,12 @@ az cloud set --name AzureCloud
 echo "Log in with your VMware AD account on your browser"
 az login
 
-read -p 'Please enter the Opsman exact version and build. 
-You can find that info here https://network.pivotal.io/products/ops-manager/#/releases (Example: 2.9.11-build.186). : ' OPSMAN_VERSION
-read -p 'Please enter the TAS version you would like to install: ' TAS_VERSION
-read -p 'Please enter your Pivnet API refresh token. If you do NOT have one: Log into pivnet > edit profile > request new refresh token). ' REFRESH_TOKEN
+read -p 'Please enter the Opsman exact version and build. You can find that info here https://network.pivotal.io/products/ops-manager/#/releases (Example: 2.10.58-build.1011) : ' OPSMAN_VERSION
+read -p 'Please enter the TAS version you would like to install (Example: 2.11.40): ' TAS_VERSION
+read -p 'Please enter your Pivnet API refresh token. If you do NOT have one: Log into pivnet > edit profile > request new refresh token): ' REFRESH_TOKEN
 read -p 'Which support team are you a part of? (east or west): ' GSS_TEAM
 read -p 'Please enter a unique name for your resource group - all lowercase (Example: jsmith): ' RESOURCE_GROUP
-read -sp 'Please enter a new password for Service Principal/Opsman: ' SP_SECRET
+read -sp 'Please enter a new password for Opsman: ' SP_SECRET
 echo ''
 read -sp 'Please enter your Mac admin password: ' MAC_ADMIN
 
@@ -36,21 +52,23 @@ read -sp 'Please enter your Mac admin password: ' MAC_ADMIN
 SUBSCRIPTION_ID=$(az account list | grep -i $GSS_TEAM -B 3 | grep id | cut -c 12-47)
 TENANT_ID=$(az account list | grep -i $GSS_TEAM -A 2 | grep tenantId | cut -c 18-53)
 SP_NAME="http://BoshAzure$RESOURCE_GROUP"
-
+DOMAIN="test.vmware.com"
 az account set --subscription $SUBSCRIPTION_ID
 az ad app create --display-name "Service Principal for BOSH" \
---password $SP_SECRET --homepage "http://BOSHAzureCPI" \
---identifier-uris $SP_NAME
+--web-home-page-url "http://BOSHAzureCPI" \
+--identifier-uris "$SP_NAME.$DOMAIN"
 
-APPLICATION_ID=$(az ad app list --identifier-uri $SP_NAME | grep appId | cut -c 15-50)
+
+APPLICATION_ID=$(az ad app list --identifier-uri $SP_NAME.$DOMAIN | grep appId | cut -c 15-50)
 
 echo "Creating a Service Principal..."
 az ad sp create --id $APPLICATION_ID
 
+echo "Sleeping 1 minute"
 sleep 60
 
 echo "Assigning your Service Principal the Owner role..."
-az role assignment create --assignee $SP_NAME \
+az role assignment create --assignee $SP_NAME.$DOMAIN \
 --role "Owner" --scope /subscriptions/$SUBSCRIPTION_ID
 
 az provider register --namespace Microsoft.Storage
@@ -380,7 +398,7 @@ director_newconfig()
     "additional_cloud_properties": {},
     "subscription_id": "$SUBSCRIPTION_ID",
     "tenant_id": "$TENANT_ID",
-    "client_id": "$SP_NAME",
+    "client_id": "$SP_NAME.$DOMAIN",
     "client_secret": "$SP_SECRET",
     "resource_group_name": "$RESOURCE_GROUP",
     "bosh_storage_account_name": "$STORAGE_NAME",
@@ -583,10 +601,10 @@ ssh to Opsman vm:
 ssh -o StrictHostKeyChecking=no -i ~/.ssh/azurekeys/opsman ubuntu@$OPSMAN_URL
 
 To DELETE this deployment, simply run:
-az ad sp delete --id http://BoshAzure$RESOURCE_GROUP
+az ad sp delete --id http://BoshAzure$RESOURCE_GROUP.$DOMAIN
 az group delete -n $RESOURCE_GROUP -y
+NOTE: 'az group delete' can take a long time
 
 Don't forget to also delete the entry in your local /etc/hosts:
 $OPSMAN_IP $OPSMAN_URL
 "
-
